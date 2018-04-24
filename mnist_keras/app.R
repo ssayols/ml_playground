@@ -30,25 +30,25 @@ ui <-
 ## ---- server ----
 ##
 server <- function(input, output, session) {
-  
+
   # vectors with the drawn x, y coordinates
   vals <- reactiveValues(x=NULL, y=NULL)
   draw <- reactiveVal(FALSE)
-  
+
   ## ---- enter/exit draw mode (record track) ----
   observeEvent(input$plot_click, {
     draw(!draw())
     vals$x <- c(vals$x, NA) # terminate segment in plot
     vals$y <- c(vals$y, NA) # terminate segment in plot
   })
-  
+
   ## ---- reset plot ----
   observeEvent(input$reset, {
     draw(FALSE)
     vals$x <- NULL
     vals$y <- NULL
   })
-  
+
   ## ---- record mouse path when draw is active ----
   observeEvent(input$hover, {
     if(draw()) {
@@ -56,11 +56,11 @@ server <- function(input, output, session) {
       vals$y <- c(vals$y, input$hover$y)
     }
   })
-  
+
   ## ---- render image and scale down to a 28x28 matrix
   img <- reactive({
     input$guess
-    
+
     # save plot as a bitmap
     isolate({
       f <- tempfile()
@@ -70,10 +70,10 @@ server <- function(input, output, session) {
       par(opar)
       dev.off()
     })
-    
+
     # read the bitmap into a matrix of 280x280, and reduce to a matrix of 28x28
     img <- read.bmp(f)
-    img <- 1 - img # invert colors. Theoretically it's greyscale (0, 1)
+    img <- (255 - img) / 255 # invert colors, and rescale from [0, 1]
     img28 <-
       sapply(seq(from=1, to=280, by=10), function(i) {
         sapply(seq(from=1, to=280, by=10), function(j) {
@@ -81,35 +81,41 @@ server <- function(input, output, session) {
         })
       })
     file.remove(f)
-    
+
     t(img28)
   })
-  
+
   ## ---- display drawing in the plot canvas ----
   output$plot= renderPlot({
     plot(vals$x, vals$y, xlim=c(0, 28), ylim=c(0, 28), xlab=NA, ylab=NA, las=1, type="l", lwd=8)
   })
-  
+
   ## ---- guess what you drew ----
   model <-  withProgress(load_model_hdf5("model.hdf5"), value=0, message="Loading model")
   output$txtGuess <- renderText({
     # predict the flattened 28x28 image
-    model %>% predict_classes(array_reshape(img(), c(1, 28*28)))
+    if(!all(img() == img()[1, 1])) {  # only if there's something drawn
+      model %>% predict_classes(array_reshape(img(), c(1, 28*28)))
+    }
   })
-  
+
   ## ---- debug output img ----
   output$txtGuessImg <- renderText({
-    out <- ""
-    for(i in 1:nrow(img())) {
-      out <- c(out, ifelse(img()[i, ], "#", " "), "\n")
+    if(!all(img() == img()[1, 1])) {  # only if there's something drawn
+      grayscale <- factor(c(" ", ".", ":", "-", "=", "+", "*", "#", "%", "@"),
+                          levels=c(" ", ".", ":", "-", "=", "+", "*", "#", "%", "@"))
+      out <- ""
+      for(i in 1:nrow(img())) {
+        out <- c(out, as.character(grayscale[ceiling(10 * img()[i, ])]), "\n")
+      }
+      paste(out, collapse="")
     }
-    paste(out, collapse="")
   })
- 
+
   output$rasterGuessImg <- renderPlot({
     plot.new()
     rasterImage(img(), 0, 0, 1, 1)
-  }) 
+  })
 }
 
 ##
